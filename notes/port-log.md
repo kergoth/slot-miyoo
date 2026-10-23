@@ -21,6 +21,25 @@ from `f4b7bc3`. Four patches needed hand-work and one core patch went away:
 
 Not yet run on the handhelds.
 
+**Five patches of this port's own sit on top of that bump** (`0025` to `0029`).
+Four change behaviour rather than make upstream work here, and each header
+says so.
+
+| | |
+|---|---|
+| `0025` gpSP default | an unconfigured GBA cart starts on gpSP, which takes 6.3 ms a frame on the Cortex-A7 where mGBA takes 14-18 ms. A line in `selected_core.txt` still wins. Resume and quick-save states are per core, so a cart last played on mGBA does not find its old state under gpSP; `.sav` is shared. Tests that assumed an mGBA default now pin their carts |
+| `0026` NSO palettes | *NSO DMG* and *NSO Pocket* join mGBA's list after *GB Light*, from a core patch (`cores/mgba/patches/gb-nso-palettes.patch`) plus the matching names in `slot-store`. The list is 50 long now. Saved palettes are by name, so nothing moves. The choice is global: slot keeps one `gb_palette`, and a per-cart palette would mean editing `slot-ui` |
+| `0027` NSO GBA colour | the Color Correction switch means the Switch Online profile for GBA, applied as a 32,768-entry lookup in the software compositor's frame upload, ahead of LCD3x. Both cores' own GBA correction is forced off so it is never applied twice. About 0.7 ms a frame, measured on the device (mean `upload` 0.9 ms with it, 0.2 ms without) against a 16.7 ms budget. `DARKEN` is 0.4, not the shader's 0.8, which looked too dark on this panel; no source calibrates 0.8 against Nintendo's output |
+| `0028` stretch | `sp_frame()` answers no while a Game Boy picture is stretched, so the Advance SP shell's lettering strip no longer covers the bottom of it. `shown_game_bezel` already did this for console bezels. Confirmed on the handheld |
+| `0029` tests | five app tests failed on every build of this port from `0002` and `0009` on: hard-coded 720x480 positions and upstream's cropping stretch. Updated, so the suite can show a real regression |
+
+Upstream's v1.8.0 turned the Palettes switch into one Palette row whose first
+entry is *Auto*. For an original Game Boy cart that is not linked, Auto sets
+mGBA's model to Game Boy and its colours to `Auto`, and upstream's core patch
+`zz-gb-auto-palette.patch` looks the cart up by header checksum in the Game Boy
+Color's boot-ROM table, falling back to *GBC Dark Green →A*. Our two palettes
+sit in the preset list and do not touch that path.
+
 
 **It runs games on the handheld.** GB, GBC and GBA, at roughly the frame budget,
 with working input and a software renderer standing in for the GPU this device
@@ -386,9 +405,9 @@ the frontend says rather than what it does.
   device. slot's link is mGBA-only, so GB/GBC is the realistic target and GBA
   would interpret at ~22 ms a frame. See [docs/link.md](../docs/link.md).
 
-- **GB palettes are off by default.** `gb_palettes=0` in `Config/slot.state`.
-  Turn them on in the in-game menu under Screen, then L2 and R2 cycle 48 of
-  them, `GBC Red` included. mGBA does the recolouring -- slot passes the
+- **GB palettes are Auto by default.** `gb_palettes=0` in `Config/slot.state`
+  is Auto. Pick one in the in-game menu under Screen, then L2 and R2 cycle
+  Auto and 50 palettes, `GBC Red` included. mGBA does the recolouring -- slot passes the
   palette as a core option, so the software renderer is not involved -- and it
   applies to monochrome Game Boy carts, not to GBC titles that carry their own
   colour.

@@ -52,7 +52,8 @@ Everything here was seen running on the handheld, not inferred from a build.
 | saves, save states, rewind | yes, including MBC2's odd 512x4 bits |
 | big carts | 32 MB ROMs (Mother 3) play on both cores |
 | bezels | a Game Boy, Color or Advance SP body per console |
-| GB palettes | 48 of them, off by default — turn on under Screen, then L2/R2 |
+| GB palettes | 50: mGBA's 48 plus the Switch Online *NSO DMG* and *NSO Pocket*. Auto by default; pick under Screen, then L2/R2 |
+| GBA colour | the Switch Online colour profile, on the Color Correction switch; both cores' own GBA correction is off |
 | lid | closing it saves, darkens the panel, powers off after 3 min |
 | buttons | all 18, including the d-pad |
 | battery | yes, read from the vendor's `axp_test` |
@@ -80,7 +81,7 @@ emits a display list of six `Draw` variants, and all the GL sits behind one
 `/dev/fb0`; the port adds a third, a software rasteriser writing to a mmapped
 framebuffer. Nothing above that seam changed.
 
-The twenty-three patches, by what they are about:
+The twenty-eight patches, by what they are about:
 
 | | |
 |---|---|
@@ -92,8 +93,12 @@ The twenty-three patches, by what they are about:
 | panels | `0020` the layout sized from the panel at runtime, so one binary fits the Flip's 752x560 and the Mini and Mini Plus's 640x480 |
 | the Mini | `0021` volume handed to its wheel, `0022` its battery read off the SAR ADC |
 | these devices | `0007` the sticker, `0023` the handheld's own name on it |
+| behaviour | `0025` GBA carts default to gpSP, `0026` the NSO Game Boy palettes (with a core patch), `0027` the NSO GBA colour filter, `0028` no Advance SP shell on a stretched picture |
+| tests | `0029` five app tests that predate the panel-sized canvas |
 
-`0019` and `0014` are not about this device and belong upstream;
+`0025` to `0028` change what the frontend does rather than making upstream
+work here, which each patch header says. `0019` and `0014` are not about this
+device and belong upstream;
 `notes/upstream-perf-issue.md` is the issue drafted for them.
 
 ## build it
