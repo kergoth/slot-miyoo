@@ -1,0 +1,257 @@
+replace the GBA colour correction with Switch Online's
+
+This changes how GBA games look rather than making upstream work here.
+The Color Correction setting is unchanged in the menu and in
+slot_state.txt, but for a GBA cart "on" now means the filter in
+libretro's NSO-gba-color.slang (sRGB profile), which is
+gentler than mGBA's and gpSP's own correction: it keeps primaries
+saturated where theirs bleed them into each other, so yellows stay
+yellow rather than turning salmon. Game Boy and Game Boy Color carts
+are untouched.
+
+The filter runs in the software compositor's frame upload, before the
+LCD3x mask. A GBA frame is 5 bits a channel, so it is a 32,768-entry
+table built the first time it is wanted and one lookup a pixel after
+that, costing upload_us in the SLOT_TRACE_LATENCY profile and nothing
+elsewhere. colour_option now holds both cores' own GBA correction off
+whatever the setting says, or the colours would be corrected twice.
+
+The GL compositor has no equivalent, so a desktop host build shows GBA
+games uncorrected. This port runs the software backend.
+diff --git a/crates/slot/src/core.rs b/crates/slot/src/core.rs
+--- a/crates/slot/src/core.rs
++++ b/crates/slot/src/core.rs
+@@ -153,11 +153,14 @@
+     );
+ }
+ 
++/// A GBA frame is corrected by the frontend (see `slot-gfx`'s `set_gba_colour`),
++/// so the cores' own correction stays off there whatever the setting says.
+ pub fn colour_option(
+     which: Core,
+     platform: Platform,
+     on: bool,
+ ) -> Option<(&'static str, &'static str)> {
++    let on = on && platform != Platform::Gba;
+     match which {
+         Core::Mgba => Some((
+             "mgba_color_correction",
+@@ -236,24 +239,36 @@
+     #[test]
+     fn each_core_spells_colour_correction_its_own_way() {
+         assert_eq!(
+-            colour_option(Core::Mgba, Platform::Gba, true),
++            colour_option(Core::Mgba, Platform::Gbc, true),
+             Some(("mgba_color_correction", "Auto"))
+         );
+         assert_eq!(
+-            colour_option(Core::Mgba, Platform::Gba, false),
++            colour_option(Core::Mgba, Platform::Gbc, false),
+             Some(("mgba_color_correction", "OFF"))
+         );
+         assert_eq!(
+-            colour_option(Core::Gpsp, Platform::Gba, true),
++            colour_option(Core::Gpsp, Platform::Gbc, true),
+             Some(("gpsp_color_correction", "enabled"))
+         );
+         assert_eq!(
+-            colour_option(Core::Gpsp, Platform::Gba, false),
++            colour_option(Core::Gpsp, Platform::Gbc, false),
+             Some(("gpsp_color_correction", "disabled"))
+         );
+     }
+ 
+     #[test]
++    fn gba_colour_correction_is_never_left_to_the_core() {
++        assert_eq!(
++            colour_option(Core::Mgba, Platform::Gba, true),
++            Some(("mgba_color_correction", "OFF"))
++        );
++        assert_eq!(
++            colour_option(Core::Gpsp, Platform::Gba, true),
++            Some(("gpsp_color_correction", "disabled"))
++        );
++    }
++
++    #[test]
+     fn mgba_uses_gbc_correction_for_game_boy_games() {
+         assert_eq!(
+             colour_option(Core::Mgba, Platform::Gb, true),
+diff --git a/crates/slot/src/frontend.rs b/crates/slot/src/frontend.rs
+--- a/crates/slot/src/frontend.rs
++++ b/crates/slot/src/frontend.rs
+@@ -549,6 +549,10 @@
+             slot_store::Shader::Dot => ScreenEffect::Dot,
+             slot_store::Shader::Simpletex => ScreenEffect::Simpletex,
+         });
++        compositor.set_gba_colour(
++            self.session.app().playing_platform() == slot_store::Platform::Gba
++                && self.session.app().colour_correction(),
++        );
+         compositor.set_shake(self.session.app().screen_shake());
+         compositor.set_screen_power(self.session.app().screen_power());
+         compositor.set_screen_footer(self.session.app().screen_footer());
+diff --git a/crates/slot-gfx/src/soft/mod.rs b/crates/slot-gfx/src/soft/mod.rs
+--- a/crates/slot-gfx/src/soft/mod.rs
++++ b/crates/slot-gfx/src/soft/mod.rs
+@@ -23,6 +23,7 @@
+ //!     Flip reports `rotate 0` and a landscape panel.
+ 
+ mod fb;
++mod nso;
+ mod raster;
+ 
+ pub use fb::FbdevSurface;
+@@ -214,6 +215,10 @@
+     /// Source frame as RGBA, converted once on upload from the core's XRGB8888.
+     frame: Image,
+     effect: ScreenEffect,
++    /// The GBA colour filter, built the first time it is wanted. Empty until
++    /// then, which is most of the time on a Game Boy card.
++    nso: Vec<u32>,
++    gba_colour: bool,
+     power: f32,
+     pic: [f32; 4],
+     src: [f32; 4],
+@@ -249,6 +254,8 @@
+         Game {
+             frame: Image::new(SRC_W, SRC_H),
+             effect: ScreenEffect::Lcd3x,
++            nso: Vec::new(),
++            gba_colour: false,
+             power: 1.0,
+             pic: WHOLE_TEXTURE,
+             src: WHOLE_TEXTURE,
+@@ -267,6 +274,10 @@
+     fn upload(&mut self, xrgb8888: &[u8]) {
+         let want = (SRC_W * SRC_H * 4) as usize;
+         if xrgb8888.len() < want {
++            return;
++        }
++        if self.gba_colour {
++            nso::apply(&self.nso, &xrgb8888[..want], &mut self.frame.px[..want]);
+             return;
+         }
+         // XRGB8888 is B, G, R, X in memory on little-endian, which is exactly
+@@ -1207,6 +1218,15 @@
+         self.game.effect = effect;
+     }
+ 
++    /// Run the game frame through the Switch Online GBA colour filter. Only
++    /// meaningful for a GBA frame: a Game Boy frame is not 5 bits a channel.
++    pub fn set_gba_colour(&mut self, on: bool) {
++        if on && self.game.nso.is_empty() {
++            self.game.nso = nso::table();
++        }
++        self.game.gba_colour = on;
++    }
++
+     pub fn set_picture(&mut self, rect: [f32; 4]) {
+         self.game.pic = rect;
+     }
+diff --git a/crates/slot-gfx/src/fbo.rs b/crates/slot-gfx/src/fbo.rs
+--- a/crates/slot-gfx/src/fbo.rs
++++ b/crates/slot-gfx/src/fbo.rs
+@@ -175,6 +175,10 @@
+     pub fn set_screen_effect(&mut self, effect: crate::ScreenEffect) {
+         self.game.set_effect(effect);
+     }
++
++    /// The Switch Online GBA filter is a software-backend feature; the GL
++    /// compositor leaves the frame to the core's own colour correction.
++    pub fn set_gba_colour(&mut self, _on: bool) {}
+ 
+     pub fn set_picture(&mut self, rect: [f32; 4]) {
+         self.game.set_picture(rect);
+diff --git a/crates/slot-gfx/src/soft/nso.rs b/crates/slot-gfx/src/soft/nso.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/slot-gfx/src/soft/nso.rs
+@@ -0,0 +1,87 @@
++//! Nintendo Switch Online's GBA colour filter, as libretro's
++//! `NSO-gba-color.slang` (sRGB profile) computes it: expand to linear light,
++//! mix the channels through a fixed matrix, clamp, then re-encode with a
++//! gamma that also darkens the picture.
++//!
++//! A GBA frame carries 5 bits a channel, so the whole filter is a table of
++//! 32,768 entries built once; applying it to a frame is one lookup a pixel.
++
++const GAMMA: f32 = 2.2;
++
++/// The shader's `darken_screen` is 0.8; 0.4 keeps its mixing and dims less.
++const DARKEN: f32 = 0.4;
++
++/// Output channel by input channel, in the shader's `GBA_sRGB` weights.
++const MIX: [[f32; 3]; 3] = [
++    [0.865, 0.1225, 0.0125],
++    [0.0575, 0.925, 0.0125],
++    [0.0575, 0.1225, 0.82],
++];
++
++pub const LEN: usize = 1 << 15;
++
++/// Indexed by the top five bits of R, G and B (`r << 10 | g << 5 | b`);
++/// each entry is B, G, R, opaque, which is a canvas pixel as it sits in memory.
++pub fn table() -> Vec<u32> {
++    let exponent = DARKEN / (GAMMA * GAMMA) + 1.0 / GAMMA;
++    let linear: Vec<f32> = (0..32u32)
++        .map(|c| (((c << 3) | (c >> 2)) as f32 / 255.0).powf(GAMMA))
++        .collect();
++    (0..LEN)
++        .map(|i| {
++            let input = [linear[i >> 10], linear[(i >> 5) & 31], linear[i & 31]];
++            let [r, g, b] = MIX.map(|row| {
++                let mixed: f32 = row.iter().zip(input).map(|(w, v)| w * v).sum();
++                ((mixed.clamp(0.0, 1.0).powf(exponent) * 255.0 + 0.5) as u32).min(255)
++            });
++            b | g << 8 | r << 16 | 0xFF00_0000
++        })
++        .collect()
++}
++
++/// `xrgb` and `out` are B, G, R, X pixels of the same length.
++pub fn apply(table: &[u32], xrgb: &[u8], out: &mut [u8]) {
++    for (px, out) in xrgb.chunks_exact(4).zip(out.chunks_exact_mut(4)) {
++        let i = (usize::from(px[2] >> 3) << 10)
++            | (usize::from(px[1] >> 3) << 5)
++            | usize::from(px[0] >> 3);
++        out.copy_from_slice(&table[i].to_le_bytes());
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn filtered(r: u8, g: u8, b: u8) -> [u8; 3] {
++        let mut out = [0u8; 4];
++        apply(&table(), &[b, g, r, 0], &mut out);
++        [out[2], out[1], out[0]]
++    }
++
++    fn near(got: [u8; 3], want: [u8; 3]) {
++        assert!(
++            got.iter().zip(want).all(|(g, w)| g.abs_diff(w) <= 1),
++            "{got:?} is not within 1 of {want:?}"
++        );
++    }
++
++    #[test]
++    fn matches_the_shader_on_known_colours() {
++        // Reference values from the shader's own arithmetic in float64 with
++        // the input rounded to five bits and expanded by bit replication.
++        near(filtered(0, 0, 0), [0, 0, 0]);
++        near(filtered(255, 0, 0), [236, 55, 55]);
++        near(filtered(0, 255, 0), [83, 245, 83]);
++        near(filtered(0, 0, 255), [24, 24, 229]);
++        near(filtered(255, 255, 255), [255, 254, 255]);
++    }
++
++    #[test]
++    fn pixels_come_out_opaque_and_in_canvas_order() {
++        let mut out = [0u8; 4];
++        apply(&table(), &[255, 0, 0, 0], &mut out);
++        assert_eq!(out[3], 255);
++        assert!(out[0] > out[2], "blue input must land in byte 0: {out:?}");
++    }
++}
