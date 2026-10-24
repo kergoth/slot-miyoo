@@ -52,7 +52,7 @@ index 60f4f9b..015e100 100644
          self.surround = None;
          // The surround is painted only when the output rect moves, so without
          // this the answer that was on the panel stays there -- the shell would
-@@ -1857,6 +1864,39 @@ mod neon_kernel_tests {
+@@ -1857,6 +1864,40 @@ mod neon_kernel_tests {
  }
  
  #[cfg(test)]
@@ -89,6 +89,7 @@ index 60f4f9b..015e100 100644
 +    }
 +}
 +
++#[cfg(test)]
  mod blue_light_tests {
      use super::*;
  

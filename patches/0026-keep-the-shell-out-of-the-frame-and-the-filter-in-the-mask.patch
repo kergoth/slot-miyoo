@@ -464,4 +464,4 @@ index 015e100..05d903a 100644
 +    }
  }
  
- mod direct_path_tests {
+ #[cfg(test)]

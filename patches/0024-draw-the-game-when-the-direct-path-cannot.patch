@@ -93,7 +93,7 @@ index f42dc11..60f4f9b 100644
              let t = std::time::Instant::now();
              let path = self.game.draw_direct(
                  FbDest {
-@@ -1837,6 +1857,70 @@ mod neon_kernel_tests {
+@@ -1837,6 +1857,71 @@ mod neon_kernel_tests {
  }
  
  #[cfg(test)]
@@ -161,6 +161,7 @@ index f42dc11..60f4f9b 100644
 +    }
 +}
 +
++#[cfg(test)]
  mod direct_path_tests {
      use super::{fb, Dest, FbDest, Game, Image};
      use crate::pipeline::{SRC_H, SRC_W};
