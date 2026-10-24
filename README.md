@@ -80,7 +80,7 @@ emits a display list of six `Draw` variants, and all the GL sits behind one
 `/dev/fb0`; the port adds a third, a software rasteriser writing to a mmapped
 framebuffer. Nothing above that seam changed.
 
-The twenty-five patches, by what they are about:
+The thirty patches, by what they are about:
 
 | | |
 |---|---|
@@ -92,8 +92,11 @@ The twenty-five patches, by what they are about:
 | panels | `0020` the layout sized from the panel at runtime, so one binary fits the Flip's 752x560 and the Mini and Mini Plus's 640x480 |
 | the Mini | `0021` volume handed to its wheel, `0022` its battery read off the SAR ADC |
 | these devices | `0007` the sticker, `0023` the handheld's own name on it |
+| behaviour | `0027` GBA carts default to gpSP, `0028` the Switch Online Game Boy palettes (with a core patch), `0029` no Advance SP shell on a stretched picture, `0031` the Switch Online GBA colour filter |
+| tests | `0030` five app tests that predate the panel-sized canvas |
 
-`0019` and `0014` are not about this device and belong upstream;
+`0027`, `0028`, `0029` and `0031` change what the frontend does rather than
+making upstream work here, which each patch header says. `0019` and `0014` are not about this device and belong upstream;
 `notes/upstream-perf-issue.md` is the issue drafted for them.
 
 ## build it

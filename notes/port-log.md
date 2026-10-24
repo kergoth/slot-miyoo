@@ -247,6 +247,7 @@ touched: the UI emits the same display list it always did.
 | `0028` | the Switch Online Game Boy palettes, in the core and in slot's list |
 | `0029` | taking the Advance SP shell off a stretched picture |
 | `0030` | the five app tests that were written for upstream's canvas |
+| `0031` | GBA colour corrected the way Switch Online does it, in place of the cores' own |
 
 `0006` is a gap: it timed the eject, answered its question — the stall was a
 deploy writing to the same card, not the eject — and was retired. `task patch`
